@@ -1,0 +1,310 @@
+---
+title: "R for dataviz with Redshift"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Interact with Redshift using SQL
+
+Whenever in doubt, don't forget Redshift has its own flavor of SQL, and you can always check your functions in [Amazon Redshift SQL](http://docs.aws.amazon.com/redshift/latest/dg/c_redshift-sql.html) documentation.
+
+Software used:
+
+- [Amazon Redshift](https://aws.amazon.com/redshift/) 
+- [RStudio](https://www.rstudio.com/)
+
+
+### Connecting to Redshift
+
+First step is to setup some parameters, to prepare your connection to the database. 
+
+
+
+```{r SQL settings, eval=FALSE}
+Sys.setenv(REDSHIFT_USER = "user", REDSHIFT_PASSWD = "password") # use your real credentials, if not already set in the environment
+
+redshiftUser <- Sys.getenv("REDSHIFT_USER")
+redshiftPassword <- Sys.getenv("REDSHIFT_PASSWD")
+redshiftPort <- 5439 # default port
+redshiftHost <- "clusterName.abc01234.us-east-1.redshift.amazonaws.com" # get this string from your AWS console (or ask a colleague)
+dbName <- "myDb"
+dbTable <- "dbTable"
+```
+
+
+```{r Load real SQL settings, echo=FALSE, message=FALSE}
+# Load our own version of dbName, dbTable and credentials from the environment to compile the next steps
+if (file.exists("knitrEnv.RData")) load(file = "knitrEnv.RData")
+# To create your env locally, copy and update the following
+# knitrEnv = new.env()
+# assign("redshiftUser", "myRealUser", envir = knitrEnv)
+# assign("redshiftPassword", "myRealPassword", envir = knitrEnv)
+# assign("redshiftHost", "realCluster.randomString.us-east-1.redshift.amazonaws.com", envir = knitrEnv)
+# assign("redshiftPort", 5439, envir = knitrEnv)
+# assign("dbName", "db_name", envir = knitrEnv)
+# assign("dbTable", "db_table", envir = knitrEnv)
+# save(knitrEnv, list = ls(knitrEnv), file="knitrEnv.RData", envir = knitrEnv)
+```
+
+Then you will need osme libraries to get the job done. You can either install these using the `install.packages(..)` command or using the **Packages** tab of RStudio.
+
+
+```{r Libraries, warning = FALSE, message=FALSE}
+
+library(GetoptLong)  # Use for qq and qqcat method, usful for easy templating
+library(RPostgreSQL) # The PostgreSQL driver to connect to Redshfit
+library(readr)       # To load sql template files
+library(magrittr)    # To get nice pipes
+library(plyr)        # Data transformation
+library(dplyr)       # More data wrangling
+library(tidyr)       # Data transformation continuer
+library(lubridate)   # To work with dates
+library(ggplot2)     # We want plots
+library(scales)      # Lots of useful scaling funcs, life pretty_breaks
+library(viridis)     # The best graph color palette
+
+```
+
+
+And now you can copy/paste the following helper to handle the boilerplate:
+
+
+```{r SQL helpers}
+
+#' Load a sql template, parse it with the variables set in the current environment 
+#' and execute this in the current Redhshift configuration set
+#' @param sqlTemplatePath string relative filepath of the sql template file
+#' @param command string, 'get' when you want to fetch data, 'send' for simple executions
+#' @param debugSQL logical Dump the SQL string (after variables injection in the template) if TRUE
+#' @param execSql logical To let you do dry-run if FALSE
+#' @output data frame if \code{command} is "get"
+executeSqlTemplate <- function(sqlTemplatePath, command = "get", debugSQL = FALSE, execSql = TRUE) {
+    template <- readr::read_file(sqlTemplatePath)
+    executeSql(template, command, debugSQL = debugSQL, execSql = execSql)
+}
+
+
+#' Parse a SQL string with the variables set in the current environment 
+#' and execute this in the current Redhshift configuration set
+#' @param sql string the SQL query (with placeholder for variable injection if needed)
+#' @param command string, 'get' when you want to fetch data, 'send' for simple executions
+#' @param debugSQL logical Dump the SQL string (after variables injection in the template) if TRUE
+#' @param execSql logical To let you do dry-run if FALSE
+#' @output data frame if \code{command} is "get"
+executeSql <- function(sql, command = "get", debugSQL = FALSE, execSql = TRUE) {
+    sqlQuery <- qq(sql)
+    if (debugSQL) qqcat(sqlQuery)
+    
+    qqcat(strsplit(sqlQuery, "\n")[[1]][1])
+    
+    results <- if (execSql && command == "get") {
+        dbGetQuery(redshift, sqlQuery)
+    } else if (execSql && command == "send") {
+        dbSendQuery(redshift, sqlQuery)
+    } else {
+        NA
+    }
+    results
+}
+
+#' Initalize the Redshift connection, call it before sending queries to set a 
+#' current connection in the local environment
+#' @output DBI connection
+getRedshiftConn <- function() {
+    driver <- dbDriver("PostgreSQL")
+    conn <- dbConnect(driver, 
+                      host = redshiftHost,
+                      port = redshiftPort,
+                      dbname = dbName,
+                      user = redshiftUser,
+                      password = redshiftPassword)
+    conn
+}
+
+#' Utility to ask th eDBI driver to correctly escape your string, usefull to avoid the single-double-quotes mess
+#' @param str string the sql string to escape
+#' @param conn DBI connection the current connection
+#' @output string
+escapeSql <- function(str, conn) {
+    ifelse(is.na(str), 
+           NA, 
+           dbQuoteString(conn, str))
+}
+
+
+#' Close your DBI connection
+#' @param conn DBI connection the current connection
+closeRedshiftConn <- function(conn) {
+    dbDisconnect(conn) # close connection
+}
+```
+
+
+
+### Sending simple SQL queries
+
+Ok, now you're set, you can start sending queries!
+
+
+```{r Simple SQL, eval=FALSE}
+redshift <- getRedshiftConn()
+dbgSql <- "SELECT year, COUNT(*) as items,
+COALESCE(sum(CASE WHEN pr THEN 1 ELSE 0 END),0) as pr,
+COALESCE(sum(CASE WHEN oa THEN 1 ELSE 0 END),0) as oa,
+FROM myTable
+WHERE publication_year BETWEEN 2005 AND 2016
+GROUP BY year ORDER BY year ASC;"
+testSQL <- executeSql(dbgSql)
+```
+
+### Using templates
+
+The `qq` function let us use simple templating. Variables are looked for in the current environment, and ar identified with the `@{variableName}` syntax.
+
+```{r SQL template sample, eval=FALSE}
+redshift <- getRedshiftConn()
+yearMin <- 2005
+yearMax <- 2016
+dbgSql <- "SELECT year, COUNT(*) as items,
+COALESCE(sum(CASE WHEN pr THEN 1 ELSE 0 END),0) as pr,
+COALESCE(sum(CASE WHEN oa THEN 1 ELSE 0 END),0) as oa,
+FROM @{dbTable}
+WHERE publication_year BETWEEN @{yearMin} AND @{yearMax}
+GROUP BY year ORDER BY year ASC;"
+testSample <- executeSql(dbgSql)
+```
+
+And this SQL template can be saved to a file, and loaded on-demand like this:
+
+```{r SQL template file, eval=FALSE}
+redshift <- getRedshiftConn()
+yearMin <- 2005
+yearMax <- 2016
+testTemplate <- executeSqlTemplate("path/to/template.sql")
+```
+
+
+## Using dplyR DSL rather than SQL
+
+If you don't have some SQL to start with, and you prefer a more abstract DSL, the dplyR package provides you a nice way to interact with your data. 
+
+To do so, your data source is no longer the PostreSQL'S DBI driver, but dplyR's own `src_postgres` and `tbl` functions to get reference to the DB and its tables, as illustrated below.
+
+```{r DplyR DSL connection}
+redshift <- src_postgres(dbName,
+                        host = redshiftHost, port = redshiftPort,
+                        user = redshiftUser,  password = redshiftPassword)
+# create table reference
+tblRef <- tbl(redshift, dbTable)
+```
+
+DplyR's `glimpse` data overview is also very handy to have a quick overview of the table you're connecting to:
+
+
+```{r Glimpse, eval=FALSE}
+glimpse(tblRef)
+```
+
+```{r Glimpse simulated output, eval=FALSE}
+Observations: 96,158,229
+Variables: 27
+$ id                      (dbl) 3.753801e+12, 3.753801e+12, 3.753801e+12, 3.753801e+12, 7.241315e+12, 7.241315e+12, 7.241315e+12, 7.24...
+$ sha1                    (chr) "47837d60b3bb8e8a2c36e83de7b502b4a7204ecf", "478972d4defcfa2e41440b8cc6841989da79a11b", "4791cc15da71a...
+$ indexed                 (lgl) FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE, TRUE, FALSE, ...
+$ publication_year        (int) NA, 2010, 2008, 2008, NA, 2001, 2007, 1975, 2010, 2006, 1976, 1986, 1992, 2013, 1973, 2013, 1958, 1866...
+$ language                (chr) NA, "jpn", "eng", "eng", NA, "eng", NA, "eng#dut", "ger", "eng", NA, "eng", "eng#por", "eng", "eng", N...
+...
+```
+
+Ok, you have a working connection to the database. Now, let start to play with the DSL.
+DplyR - and it's companion magrittR - provide a pipe operator `%>%`  (magrittr also gives you a Tee operator `%T>%`, an assignation-and-pipe `%<>%`, and a pipe without data `%$%`... but start with standard pipes and then you'll be eager to use more!)  The basic idea is that rather than combining methods calls in parenthesis pyramidal-like structures, the pipe will fill the first argument of the right-side of the pipe operator with the output of the left side of the pipe. For example, `mutate(filter(myData, someField > 10), newField = someField + 2)` becomes `myData %>% filter(someField > 10) %>% mutate(newField = someField + 2)`.
+
+DplyR and tidyR give you a lot of function to filter, arrange, mutate, filter, select, and summarize your data, and a quick look at the 2 pages from the [Data wrangling cheat sheet](http://www.rstudio.com/wp-content/uploads/2015/02/data-wrangling-cheatsheet.pdf) is probably for best and fastest way to get yoru hands on it.
+
+Let's try it. In the example below, we're requesting againt a 90M observations x 27 variables table. Keep in mind that the DSL is smart enough to build the requests and return you only the results, ie you don't have to load all that data in your local memory.... unless you're asking for it!
+
+```{r DplyR DSL intro}
+
+yearRepartition <- tblRef %>% 
+    filter(publication_year >= 2005 & publication_year < 2016) %>% 
+    group_by(publication_year) %>% 
+    summarise(items_cnt = n()) %>% 
+    arrange(publication_year)
+knitr::kable(yearRepartition)
+```
+
+Here the summary is simple, just a count, but you have access to all your favorite and baked-in tools in R: santard deviation, variance, ... 
+
+```{r DplyR DSL sampling}
+
+dslSample2 <- tblRef %>% 
+    filter(publication_year >= 2005 & publication_year < 2016) %>% 
+    group_by(domain, publication_year) %>% 
+    mutate(indexed_val = if (indexed) 1 else 0) %>%   # Convert logical to int, ifelse(,,) cannot be run on DB
+    summarize(items_cnt = n(), indexed_var = var(indexed_val), publication_year = publication_year) %>% 
+    mutate(items_vmin = items_cnt * (1 - indexed_var), 
+           items_vmax = items_cnt * (1 + indexed_var)) %>% 
+    arrange(domain, publication_year)
+
+knitr::kable(dslSample2)
+```
+
+
+## Data transformation and visualization
+
+
+```{r Sample GGplot}
+dfTable <- as.data.frame(yearRepartition) # we have to fetch the data to get a data frame rather than a tbl_postgrestbl_sqltbl
+ggplot(dfTable) + coord_cartesian(ylim = c(0, max(dfTable$items_cnt))) +
+    scale_x_continuous(breaks = pretty_breaks()) + scale_y_continuous(labels = comma) +
+    theme_bw() +
+    geom_line(aes(publication_year, items_cnt))
+    
+```
+
+
+```{r Multiple aesthetics and facetting, fig.width=12, fig.height=24}
+dsl2Df <- as.data.frame(dslSample2)
+ggplot(dsl2Df, aes(publication_year, items_cnt)) +
+    geom_smooth(level = 0.95) + 
+    geom_line(aes(color = domain)) +
+    geom_errorbar(aes(x = publication_year, 
+                      ymin = items_vmin, ymax = items_vmax,
+                      color = domain, width = 0.2)) +
+    scale_fill_viridis() + scale_y_log10(labels = comma) + # + scale_y_continuous(labels = comma)
+    scale_x_continuous(breaks = pretty_breaks()) + 
+    facet_wrap(~domain , ncol = 2 ) + theme_bw()
+```
+
+TODO: add example with histogram, plots, boxplots, fiting model, ....
+
+
+## Other tools
+
+base plots
+
+package manipulate
+
+Other graph libraries
+
+plotly from R, 
+
+## Reference
+
+### DplyR tutorials and resources
+
+- [dplyR repo and quick intro](https://github.com/hadley/dplyR)
+- [RStudio: Data wrangling heat sheet](http://www.rstudio.com/wp-content/uploads/2015/02/data-wrangling-cheatsheet.pdf) (Really great!, covers plyR and tidyr)
+- [Datascience+: data manipulation with dplyR](http://datascienceplus.com/data-manipulation-with-dplyR/)
+- [dplyR tutorial](http://genomicsclass.github.io/book/pages/dplyR_tutorial.html)
+- [Datacamp tutorial: Data Manipulation in R with dplyR](https://www.datacamp.com/courses/dplyR-data-manipulation-r-tutorial)
+
+
+### ggplot2 resources
+- [RStudio: ggplot2 cheat sheet](http://www.rstudio.com/wp-content/uploads/2015/12/ggplot2-cheatsheet-2.0.pdf) (Really great!)
+- [ggplot2 official documentation](http://docs.ggplot2.org/current/)
+- [How to make any plot in ggplot2?](http://r-statistics.co/ggplot2-Tutorial-With-R.html)
