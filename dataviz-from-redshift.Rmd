@@ -283,22 +283,25 @@ ggplot(dsl2Df, aes(publication_year, items_cnt)) +
 TODO: add example with histogram, plots, boxplots, fiting model, ....
 
 
+
+
 ## Other tools
 
 base plots
 
-package manipulate
+package `manipulate` to bring basic interactivity easily in your plot parameters
 
-Other graph libraries
+Other graph libraries (highCharts, rCharts, ...)
 
-plotly from R, 
+Plotly from R
+
 
 ## Reference
 
 ### DplyR tutorials and resources
 
 - [dplyR repo and quick intro](https://github.com/hadley/dplyR)
-- [RStudio: Data wrangling heat sheet](http://www.rstudio.com/wp-content/uploads/2015/02/data-wrangling-cheatsheet.pdf) (Really great!, covers plyR and tidyr)
+- [RStudio: Data wrangling cheat sheet](http://www.rstudio.com/wp-content/uploads/2015/02/data-wrangling-cheatsheet.pdf) (Really great!, covers plyR and tidyr)
 - [Datascience+: data manipulation with dplyR](http://datascienceplus.com/data-manipulation-with-dplyR/)
 - [dplyR tutorial](http://genomicsclass.github.io/book/pages/dplyR_tutorial.html)
 - [Datacamp tutorial: Data Manipulation in R with dplyR](https://www.datacamp.com/courses/dplyR-data-manipulation-r-tutorial)

@@ -326,13 +326,14 @@ ggplot(dfTable) + coord_cartesian(ylim = c(0, max(dfTable$items_cnt))) +
 ``` r
 dsl2Df <- as.data.frame(dslSample2)
 ggplot(dsl2Df, aes(publication_year, items_cnt)) +
+    geom_smooth(level = 0.95) + 
     geom_line(aes(color = domain)) +
     geom_errorbar(aes(x = publication_year, 
-                      ymin = items_vmin, ymax = items_vmax, 
+                      ymin = items_vmin, ymax = items_vmax,
                       color = domain, width = 0.2)) +
     scale_fill_viridis() + scale_y_log10(labels = comma) + # + scale_y_continuous(labels = comma)
-    scale_x_continuous(breaks = pretty_breaks()) +
-    facet_wrap(~ domain , ncol = 2 ) + theme_bw()
+    scale_x_continuous(breaks = pretty_breaks()) + 
+    facet_wrap(~domain , ncol = 2 ) + theme_bw()
 ```
 
 ![](dataviz-from-redshift_files/figure-markdown_github/Multiple%20aesthetics%20and%20facetting-1.png)<!-- -->
@@ -344,11 +345,11 @@ Other tools
 
 base plots
 
-package manipulate
+package `manipulate` to bring basic interactivity easily in your plot parameters
 
-Other graph libraries
+Other graph libraries (highCharts, rCharts, ...)
 
-plotly from R,
+Plotly from R
 
 Reference
 ---------
@@ -356,7 +357,7 @@ Reference
 ### DplyR tutorials and resources
 
 -   [dplyR repo and quick intro](https://github.com/hadley/dplyR)
--   [RStudio: Data wrangling heat sheet](http://www.rstudio.com/wp-content/uploads/2015/02/data-wrangling-cheatsheet.pdf) (Really great!, covers plyR and tidyr)
+-   [RStudio: Data wrangling cheat sheet](http://www.rstudio.com/wp-content/uploads/2015/02/data-wrangling-cheatsheet.pdf) (Really great!, covers plyR and tidyr)
 -   [Datascience+: data manipulation with dplyR](http://datascienceplus.com/data-manipulation-with-dplyR/)
 -   [dplyR tutorial](http://genomicsclass.github.io/book/pages/dplyR_tutorial.html)
 -   [Datacamp tutorial: Data Manipulation in R with dplyR](https://www.datacamp.com/courses/dplyR-data-manipulation-r-tutorial)
